@@ -27,9 +27,15 @@ typedef boost::shared_ptr<Option6Auth> Option6AuthPtr;
 class Option6Auth: public Option {
 
 public:
-    static const uint8_t OPTION6_AUTH_MIN_LEN  = 11;
-    static const uint8_t OPTION6_HASH_MSG_LEN  = 16;
-    static const uint8_t OPTION6_HDR = 4; 
+    const static uint8_t ALGO_RECONF_KEY = 0;
+    const static uint8_t ALGO_HMAC_MD5 = 1;
+    const static uint8_t OPTION6_AUTH_MIN_LEN  = 11;
+    const static uint8_t OPTION6_HASH_MSG_LEN  = 16;
+    const static uint8_t OPTION6_HDR = 4; 
+    const static uint8_t PROTO_RECONF_KEY = 3; 
+    const static uint8_t RDM_METHOD_MONO_INCR = 0;
+    const static uint8_t VALUE_TYPE_HMAC = 2;
+    const static uint8_t VALUE_TYPE_KEY = 1;
     /// @brief Constructor, used for auth options while transmitting
     ///
     /// @param proto protocol type

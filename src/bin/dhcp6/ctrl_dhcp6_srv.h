@@ -196,6 +196,10 @@ private:
     commandConfigWriteHandler(const std::string& command,
                               isc::data::ConstElementPtr args);
 
+    /// @brief send reconfig message
+    isc::data::ConstElementPtr 
+    commandSendReconfigHandler(const std::string&,
+                               isc::data::ConstElementPtr args);
     /// @brief handler for processing 'config-set' command
     ///
     /// This handler processes config-set command, which processes

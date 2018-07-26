@@ -7,6 +7,7 @@
 #include <config.h>
 
 #include <asiolink/io_address.h>
+#include <cryptolink/crypto_hmac.h>
 #include <dhcp_ddns/ncr_msg.h>
 #include <dhcp/dhcp6.h>
 #include <dhcp/docsis3_option_defs.h>
@@ -15,6 +16,7 @@
 #include <dhcp/iface_mgr.h>
 #include <dhcp/libdhcp++.h>
 #include <dhcp/option6_addrlst.h>
+#include <dhcp/option6_auth.h>
 #include <dhcp/option6_client_fqdn.h>
 #include <dhcp/option6_ia.h>
 #include <dhcp/option6_iaaddr.h>
@@ -75,6 +77,7 @@
 #include <boost/algorithm/string/split.hpp>
 
 #include <algorithm>
+#include <iterator>
 #include <stdlib.h>
 #include <time.h>
 #include <iomanip>
@@ -2777,7 +2780,9 @@ Dhcpv6Srv::processSolicit(AllocEngine::ClientContext6& ctx) {
     appendRequestedVendorOptions(solicit, response, ctx, co_list);
 
     updateReservedFqdn(ctx, response);
-
+    //send reconfigure keys
+#define ENABLE_RECONFIG 
+    
     // Only generate name change requests if sending a Reply as a result
     // of receiving Rapid Commit option.
     if (response->getType() == DHCPV6_REPLY) {
@@ -3878,7 +3883,8 @@ void Dhcpv6Srv::updateHostKey(AllocEngine::ClientContext6& ctx) {
    }
 }
 
-void Dhcpv6Srv::storeClientIntfInfo(const Pkt6Ptr& pkt, AllocEngine::ClientContext6& ctx) {
+void Dhcpv6Srv::storeClientIntfInfo(const Pkt6Ptr& pkt, 
+                                    AllocEngine::ClientContext6& ctx) {
     //extract interface and ip address of the client
     auto iface = pkt->getIface();
     auto client_address = pkt->getRemoteAddr();
@@ -3913,7 +3919,66 @@ void Dhcpv6Srv::discardPackets() {
     HooksManager::clearParkingLots();
 }
 
-void Dhcpv6Srv::updateReconfigInfo(const Pkt6Ptr& msg, AllocEngine::ClientContext6& ctx) {
+uint64_t Dhcpv6Srv::getRdmValue() {
+    // fetch the rdm value stored in the rdm file
+    uint64_t rdm_value;
+    std::fstream rdm_file;
+    rdm_file.open(Dhcpv6Srv::RDM_FILE, std::fstream::in | std::fstream::out | std::fstream::app);
+
+    if (rdm_file.is_open()) { 
+        rdm_file >> rdm_value;
+        rdm_file << ++rdm_value;
+        rdm_file.close();
+    } else {
+        //unable to open the file
+        isc_throw(isc::Unexpected, "Unable to open RDM file " << Dhcpv6Srv::RDM_FILE);
+    }
+
+    return rdm_value;
+}
+
+std::string
+Dhcpv6Srv::getHostKeyStr(const DUID& duid) {
+    std::string key;
+//    std::vector<uint8_t> duid_id(duid.getDuid().begin(), duid.getDuid().end());
+
+    ConstHostCollection hosts = HostMgr::instance().getAll(Host::IDENT_DUID,
+                                                           duid.getDuid().data(),
+                                                           duid.getDuid().size());
+
+    if (!hosts.empty()) {
+        //all hosts should have the same key
+        key = hosts.front()->getKey().ToText();
+    }
+
+    return key;
+}
+
+bool Dhcpv6Srv::initiateReconfiguration(const std::string& reconfig_option, 
+                                        const std::string& client_duid) {
+    try {
+        //First fetch the host reservation for the client to check for the auth key
+
+        //the secondary configuration shall overwrite the primary configuration.
+        std::string key = getHostKeyStr(DUID::fromText(client_duid)); 
+        if (key.empty()) {
+            isc_throw(Unexpected, "No Keys available in host reservation for client");
+        }
+
+        //Create a new packet with Reconfigure message type and transaction ID as 0
+        Pkt6Ptr reconfig_msg (new Pkt6(DHCPV6_RECONFIGURE, 0));
+        //Fill the reconfigure message with all the relavent options
+        packReconfigureMessage(DUID::fromText(client_duid), reconfig_msg, reconfig_option, key);
+
+    } catch (const Exception& ex) {
+        //@todo: add log
+        return false;
+    }
+    return true;
+}
+
+void Dhcpv6Srv::updateReconfigInfo(const Pkt6Ptr& msg, 
+                                   AllocEngine::ClientContext6& ctx) {
 #ifdef ENABLE_RECONFIG 
     if (ctx.support_reconfig &&
         !ctx.fake_allocation_) {
@@ -3930,6 +3995,165 @@ void Dhcpv6Srv::updateReconfigInfo(const Pkt6Ptr& msg, AllocEngine::ClientContex
         }
     }
 #endif
+}
+
+void Dhcpv6Srv::packReconfigureMessage(const DUID& client_duid, Pkt6Ptr& msg,
+                                       const std::string& reconfig_option,
+                                       const std::string& key) {
+    //add server id
+    msg->addOption(getServerID());
+
+    //add client id
+    boost::shared_ptr<Option> client_duid_opt(new Option(Option::V6, 
+                                              D6O_CLIENTID, client_duid.getDuid()));
+
+    msg->addOption(client_duid_opt);
+    
+    //add reconfig option
+    std::map<std::string, int> reconfig_option_map = { 
+        {"renew",OP_RECONF_MSG_TYPE_RENEW}, 
+        {"rebind",OP_RECONF_MSG_TYPE_REBIND}, 
+        {"information-request", OP_RECONF_MSG_TYPE_INFORMATION_REQUEST}, 
+        {"", OP_RECONF_MSG_TYPE_RENEW} };    
+
+    OptionBuffer reconfig_option_buff;
+    reconfig_option_buff.push_back(reconfig_option_map[reconfig_option]);
+    
+    boost::shared_ptr<Option> reconfig_msg_option(new Option(Option::V6,
+                                                  D6O_RECONF_MSG, 
+                                                  reconfig_option_buff));
+   
+    msg->addOption(reconfig_msg_option);
+    
+    msg->setLocalPort(DHCP6_SERVER_PORT);
+
+    msg->setRemotePort(DHCP6_CLIENT_PORT);
+    //Reconfigure message must be unicast, set the remote client address 
+    //and interface using the leases.
+    if (addClientAddrIntf(client_duid, msg)) {
+        isc_throw(Unexpected, "Could not retrieve client address and interface info from leases");
+    }
+    
+    //msg remote gets populated in addClientAddrIntf
+    //hence call getRemoteAddr should never be called before it
+    //msg->setLocalAddr(IfaceMgr::instance().getLocalAddress(msg->getRemoteAddr(),
+     //                                                      DHCP6_CLIENT_PORT));
+    
+    //add local address and interface
+    // use the interface manager get the local address and interface connected remote client address 
+    //msg->setIndex();
+    msg->addOption(getServerID());
+    
+    //add auth field
+    addAuthOptForReconfigure(msg, key); 
+    
+    //pack the message
+    msg->pack();
+    // no callout hooks done for recofigure message
+    // @todo: verify if this is a crime
+    sendPacket(msg);
+}
+
+void Dhcpv6Srv::addAuthOptForReconfigure(Pkt6Ptr& msg,
+                                        const std::string key) {
+    //First add auth option without the key
+    //caller has to ensure all the fields of the reconfigure message must be populated before reaching here.
+
+    //generate empty auth info of 128 bits / 16 bytes
+    
+    std::vector<uint8_t> auth_info;
+    auth_info.resize(AuthKey::KEY_LEN);
+    
+    //stuff 1 octet field in the auth info to indicate its a HMAC
+    uint8_t msg_type = Option6Auth::VALUE_TYPE_HMAC;
+    auth_info.insert(auth_info.begin(), msg_type);
+    
+    Option6AuthPtr auth(new Option6Auth(Option6Auth::PROTO_RECONF_KEY, 
+                                          Option6Auth::ALGO_HMAC_MD5, 
+                                          Option6Auth::RDM_METHOD_MONO_INCR, 
+                                          getRdmValue(), auth_info));
+    msg->addOption(auth);
+    //now pack the message with empty key field
+    //@todo: check does early packing cause a problem ??
+    msg->pack();
+
+    //now calculate the md5 checksum using the key and the reconfig message
+    std::vector<uint8_t> key_info(key.begin(), key.end());
+    key_info.resize(AuthKey::KEY_LEN);
+    
+    OutputBuffer hmac_sig(0);
+    signHMAC(msg->getBuffer().getData(), msg->getBuffer().getLength(),
+             key_info.data(), AuthKey::KEY_LEN,
+             MD5, hmac_sig, AuthKey::KEY_LEN);
+
+    //ensure we have generated signature data of length 16 bytes
+    std::vector<uint8_t> hmac_info((uint8_t *)hmac_sig.getData(),
+                                   (uint8_t *)hmac_sig.getData()+AuthKey::KEY_LEN);
+    if (hmac_info.size() != AuthKey::KEY_LEN) {
+    //throw 
+        isc_throw(isc::Unexpected, "Generating signature for auth filed failed ");
+    }
+
+    //now use the hmac in the auth info field of auth option
+    hmac_info.insert(hmac_info.begin(), msg_type);
+
+    auth->setAuthInfo(hmac_info);
+
+    //delete previous stored option
+    msg->delOption(auth->getType());
+
+    //now add the new auth option with computed HMAC
+    msg->addOption(auth);
+}
+
+void Dhcpv6Srv::addAuthOptForReply(Pkt6Ptr& msg, 
+                                  const std::string key) {
+
+    //generate empty auth info of 128 bits / 16 bytes
+    
+    std::vector<uint8_t> auth_info(key.begin(), key.end());
+    auth_info.resize(AuthKey::KEY_LEN);
+
+    //insert 1 octet field in the auth info to indicate its reconfigure key
+    uint8_t msg_type = Option6Auth::VALUE_TYPE_KEY;
+    auth_info.insert(auth_info.begin(), msg_type);
+    Option6AuthPtr auth(new Option6Auth(Option6Auth::PROTO_RECONF_KEY, 
+                                          Option6Auth::ALGO_HMAC_MD5, 
+                                          Option6Auth::RDM_METHOD_MONO_INCR, 
+                                          getRdmValue(), auth_info));
+
+    msg->addOption(auth);
+}
+
+bool Dhcpv6Srv::addClientAddrIntf(const DUID& duid, Pkt6Ptr& msg) {
+    //fetch client context from the leases
+   Lease6Collection leases = LeaseMgrFactory::instance()
+                             .getLeases6(duid.getDuid());
+   //no lease = no context = dont know which IP to send
+   if (leases.empty()) {
+        return false;     
+   }
+
+   //fetch the first lease , all leases must have same IP and intf
+   auto lease = leases.front();
+   ConstElementPtr ctx = lease->getContext();
+
+   if (!ctx) {
+       return false;
+   }
+
+   ConstElementPtr addr = ctx->get("client_address");
+   ConstElementPtr intf = ctx->get("client_intf");
+
+   if (!addr ||
+       !intf) {
+       return false;
+   }
+
+   msg->setIface(intf->stringValue());
+   msg->setRemoteAddr(addr->stringValue());
+
+   return true;
 }
 
 };

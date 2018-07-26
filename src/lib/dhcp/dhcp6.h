@@ -306,6 +306,13 @@ static const uint16_t DHCP6_CLIENT_PORT = 546;
 static const uint16_t DHCP6_SERVER_PORT = 547;
 
 /*
+ * Reconfigure message constants
+ */
+static const uint8_t OP_RECONF_MSG_TYPE_RENEW = 5;
+static const uint8_t OP_RECONF_MSG_TYPE_REBIND = 6;
+static const uint8_t OP_RECONF_MSG_TYPE_INFORMATION_REQUEST = 11;
+
+/*
  * DHCPv6 Retransmission Constants (RFC3315 section 5.5, RFC 5007)
  */
 

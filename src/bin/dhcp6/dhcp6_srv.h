@@ -73,6 +73,9 @@ public:
     /// @brief Minimum length of a MAC address to be used in DUID generation.
     static const size_t MIN_MAC_LEN = 6;
 
+    /// @brief RDM value for authentication
+    const std::string RDM_FILE = "/var/log/dhcpv6rdm.txt";
+
     /// @brief Default constructor.
     ///
     /// Instantiates necessary services, required to run DHCPv6 server.
@@ -198,6 +201,34 @@ public:
     /// Updates the clients link local and interface information in context 
     /// leases
     void storeClientIntfInfo(const Pkt6Ptr& pkt, AllocEngine::ClientContext6& ctx);
+
+    /// @brief fetch auth key from host reservations
+    /// 
+    /// Retrieves host reservations for the DUID
+    /// and returns the stored authentication key in string format.
+    /// @param duid duid to fetch host reservations from.
+    /// @return auth key from the host reservation empty if no 
+    /// reservation defined.
+    std::string getHostKeyStr(const DUID& duid);
+    
+    /// @brief Reconfigure message sender
+    /// 
+    /// This is a method that is called from the ctrl to send Reconfigure
+    /// to a single client
+    ///
+    /// @param DUID of the client we need to send reconfiguraton
+    ///
+    /// @param reconfig_option whether to send Renew option, Reconfig option, Information Reuest option
+    ///
+    /// @return status of sending Reconfigure message
+    bool
+    initiateReconfiguration(const std::string& reconfigOption, const std::string& client_duid); 
+    
+    /// @brief Fetch RDM value from a file
+    ///
+    /// RDM value is used in authentication field of the messages
+    uint64_t getRdmValue();
+
 protected:
 
     /// @brief Compare received server id with our server id
@@ -956,6 +987,38 @@ public:
     /// @param rsp pointer to a response.
     void processPacketBufferSend(hooks::CalloutHandlePtr& callout_handle,
                                  Pkt6Ptr& rsp);
+
+    /// @brief Populates authentication field for the reconfigure message.
+    ///
+    /// @param DUID duid of the client.
+    /// @param msg reconfigure message to be sent.
+    /// @param key authenitcation key used for calculation of HMAC.
+    void addAuthOptForReconfigure(Pkt6Ptr& msg,
+                                  const std::string key); 
+
+    /// @brief Populates authentication field for the reply messages.
+    ///
+    /// @param DUID duid of the client.
+    /// @param msg reconfigure message to be sent.
+    /// @param key authenitcation key used for calculation of HMAC.
+    void addAuthOptForReply(Pkt6Ptr& msg, 
+                                  const std::string key);
+    
+    /// @brief Pack Reconfigure message with all the fields and options.
+    ///
+    /// @param client_duid DUID of the cient
+    /// @param msg Pkt6 pointer for the Reconfigure message.
+    void packReconfigureMessage(const DUID& client_duid, Pkt6Ptr& msg,
+                                const std::string& reconfig_option,
+                                const std::string& key);
+
+    /// @brief pack client remote address and interface info
+    ///
+    /// Fetches client address and interface information from
+    /// the user context in leases.
+    /// @param duid duid of the client
+    /// @param msg  Pkt6 pointer for the Reconfigure message.
+    bool addClientAddrIntf(const DUID& duid, Pkt6Ptr& msg);
 
 protected:
 

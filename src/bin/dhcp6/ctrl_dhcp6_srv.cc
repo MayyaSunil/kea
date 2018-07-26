@@ -297,6 +297,60 @@ ControlledDhcpv6Srv::commandConfigWriteHandler(const string&, ConstElementPtr ar
                          + filename + " successful", params));
 }
 
+isc::data::ConstElementPtr
+ControlledDhcpv6Srv::commandSendReconfigHandler(const std::string&, 
+                                                isc::data::ConstElementPtr args) {
+
+    if (args) {
+        if (args->getType() != Element::map) {
+            return (createAnswer(CONTROL_RESULT_ERROR, "Argument must be a map"));
+        }
+        
+        auto reconfigure_arg = args->get("reconfigure-option");
+        if (reconfigure_arg) {
+            if (reconfigure_arg->getType() != Element::string) {
+                return (createAnswer(CONTROL_RESULT_ERROR,
+                                     "passed parameter 'reconfigure-option' is not a string"));
+            }
+            auto send_option = reconfigure_arg->stringValue();
+            // The arguments expected to are renew or rebind or ir(information request
+            // { "reconfigure-option" : "..."}
+            // Based on the option the server shall enforce the client to 
+            // send the Respective message for reconfiguration. 
+            if ( send_option != "renew" && send_option != "rebind" &&  
+                 send_option != "ir" ) {
+                return (createAnswer(CONTROL_RESULT_ERROR, "reconfigure-option is not valid")); 
+            }
+            // currently we support sending reconfiguration to single client only
+            // @todo add support for subnet and sending message to all client.
+            auto reconfigure_target_duid = args->get("target-client");
+            auto reconfigure_target_duid_str = reconfigure_target_duid->stringValue();
+            bool result  =
+            server_->initiateReconfiguration(send_option, reconfigure_target_duid_str);
+            if (result) {
+                ElementPtr params = Element::createMap();
+                std::string result_text = "Successfuly sent reconfigure message" \
+                                           "with option:" + send_option +
+                                           "to client with duid" + reconfigure_target_duid_str;
+                params->set("result", Element::create(static_cast<int>(0)));
+                params->set("text", Element::create(result_text));
+
+                return (createAnswer(CONTROL_RESULT_SUCCESS, "Reconfig sucess", params)); 
+
+            } else {
+                ElementPtr params = Element::createMap();
+                std::string result_text = "Unable to send reconfigure message" \
+                                           "with option:" + send_option +
+                                           "to client with duid" + reconfigure_target_duid_str;
+                params->set("result", Element::create(static_cast<int>(1)));
+                params->set("text", Element::create(result_text));
+
+                return (createAnswer(CONTROL_RESULT_SUCCESS, "Reconfig sucess", params)); 
+            }
+        }
+    }
+}
+
 ConstElementPtr
 ControlledDhcpv6Srv::commandConfigSetHandler(const string&,
                                              ConstElementPtr args) {
@@ -561,9 +615,13 @@ ControlledDhcpv6Srv::processCommand(const std::string& command,
         } else if (command == "config-write") {
             return (srv->commandConfigWriteHandler(command, args));
 
+        } else if (command == "send-reconfig") {
+            return (srv->commandSendReconfigHandler(command, args));
+
         }
 
         return (isc::config::createAnswer(1, "Unrecognized command:"
+
                                           + command));
 
     } catch (const Exception& ex) {
@@ -744,6 +802,9 @@ ControlledDhcpv6Srv::ControlledDhcpv6Srv(uint16_t port)
 
     CommandMgr::instance().registerCommand("config-reload",
         boost::bind(&ControlledDhcpv6Srv::commandConfigReloadHandler, this, _1, _2));
+    
+    CommandMgr::instance().registerCommand("config-set",
+        boost::bind(&ControlledDhcpv6Srv::commandConfigSetHandler, this, _1, _2));
 
     CommandMgr::instance().registerCommand("config-test",
         boost::bind(&ControlledDhcpv6Srv::commandConfigTestHandler, this, _1, _2));
@@ -763,8 +824,8 @@ ControlledDhcpv6Srv::ControlledDhcpv6Srv(uint16_t port)
     CommandMgr::instance().registerCommand("libreload",
         boost::bind(&ControlledDhcpv6Srv::commandLibReloadHandler, this, _1, _2));
 
-    CommandMgr::instance().registerCommand("config-set",
-        boost::bind(&ControlledDhcpv6Srv::commandConfigSetHandler, this, _1, _2));
+    CommandMgr::instance().registerCommand("send-reconfig",
+        boost::bind(&ControlledDhcpv6Srv::commandSendReconfigHandler, this, _1, _2));
 
     CommandMgr::instance().registerCommand("shutdown",
         boost::bind(&ControlledDhcpv6Srv::commandShutdownHandler, this, _1, _2));
