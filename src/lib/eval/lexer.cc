@@ -1,6 +1,6 @@
-#line 1 "lexer.cc"
+#line 2 "lexer.cc"
 
-#line 3 "lexer.cc"
+#line 4 "lexer.cc"
 
 #define  YY_INT_ALIGNED short int
 
@@ -1010,7 +1010,7 @@ goto find_rule; \
 #define YY_RESTORE_YY_MORE_OFFSET
 char *yytext;
 #line 1 "lexer.ll"
-/* Copyright (C) 2015-2018 Internet Systems Consortium, Inc. ("ISC")
+/* Copyright (C) 2015-2017 Internet Systems Consortium, Inc. ("ISC")
 
    This Source Code Form is subject to the terms of the Mozilla Public
    License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -1049,7 +1049,7 @@ namespace {
 
 /* To avoid the call to exit... oops! */
 #define YY_FATAL_ERROR(msg) isc::eval::EvalContext::fatal(msg)
-#line 1052 "lexer.cc"
+#line 1053 "lexer.cc"
 /* noyywrap disables automatic rewinding for the next file to parse. Since we
    always parse only a single string, there's no need to do any wraps. And
    using yywrap requires linking with -lfl, which provides the default yywrap
@@ -1074,8 +1074,8 @@ namespace {
    by moving it ahead by yyleng bytes. yyleng specifies the length of the
    currently matched token. */
 #define YY_USER_ACTION  loc.columns(evalleng);
-#line 1077 "lexer.cc"
 #line 1078 "lexer.cc"
+#line 1079 "lexer.cc"
 
 #define INITIAL 0
 
@@ -1380,7 +1380,7 @@ YY_DECL
 
 
 
-#line 1383 "lexer.cc"
+#line 1384 "lexer.cc"
 
 	while ( /*CONSTCOND*/1 )		/* loops until end-of-file is reached */
 		{
@@ -1816,7 +1816,7 @@ YY_RULE_SETUP
 #line 218 "lexer.ll"
 ECHO;
 	YY_BREAK
-#line 1819 "lexer.cc"
+#line 1820 "lexer.cc"
 
 	case YY_END_OF_BUFFER:
 		{
